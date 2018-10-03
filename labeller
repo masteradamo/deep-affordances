@@ -1,0 +1,181 @@
+from __future__ import absolute_import
+from __future__ import division
+from __future__ import print_function
+import numpy as np
+import tensorflow as tf
+from os import listdir
+from os.path import isfile,join
+import random
+import cv2
+from collections import defaultdict as dd
+import logging
+
+#objs = ["chair", "sofa", "table", "dresser", "rocker", "desk", "bed", "davenport", "divan", "vanity", "orange", "apple", "banana", "peach"]
+#objs = ["davenport", "peach"]
+#objs = ["chair","sofa","orange","apple"]
+#objs = ["chair", "sofa", "table", "dresser", "bed", "orange", "apple", "banana", "peach", "pear", "automobile", "truck", "bus", "motorcycle", "streetcar", "gun", "switchblade", "knife", "sword", "spear", "pea", "carrot", "spinach", "broccoli", "asparagus"]
+#objs = ["chair", "sofa", "table", "dresser", "bed", "ottoman", "cabinet", "bench", "buffet", "orange", "apple", "banana", "peach", "pear", "apricot", "tangerine", "plum", "grape", "automobile", "truck", "bus", "motorcycle", "streetcar", "train", "bicycle", "carriage", "airplane", "gun", "switchblade", "knife", "sword", "bomb", "spear", "cannon", "bullet", "tomahawk", "pea", "carrot", "spinach", "broccoli", "asparagus", "corn", "cauliflower", "squash", "lettuce", "hammer", "ruler", "screwdriver", "drill", "nail", "sander", "level", "plane", "file", "robin", "sparrow", "bluebird", "canary", "blackbird", "dove", "lark", "swallow", "parakeet", "doll", "marble", "ball", "wagon", "crayon", "skate", "drum", "swing", "checker", "pant", "shirt", "dress", "skirt", "blouse", "suit", "jacket", "sweater", "underpants"]
+#cljs = [["chair", "sofa", "table", "dresser", "bed", "ottoman", "cabinet", "bench", "buffet"], ["orange", "apple", "banana", "peach", "pear", "apricot", "tangerine", "plum", "grape"], ["automobile", "truck", "bus", "motorcycle", "streetcar", "train", "bicycle", "carriage", "airplane"], ["gun", "switchblade", "knife", "sword", "bomb", "spear", "cannon", "bullet", "tomahawk"], ["pea", "carrot", "spinach", "broccoli", "asparagus", "corn", "cauliflower", "squash", "lettuce"], ["hammer", "ruler", "screwdriver", "drill", "nail", "sander", "level", "plane", "file"], ["robin", "sparrow", "bluebird", "canary", "blackbird", "dove", "lark", "swallow", "parakeet"], ["doll", "marble", "ball", "wagon", "crayon", "skate", "drum", "swing", "checker"], ["pant", "shirt", "dress", "skirt", "blouse", "suit", "jacket", "sweater", "underpants"]]
+
+objs = ['sofa', 'chair', 'bench', 'bed', 'table', 'ottoman', 'cabinet', 'vanity', 'buffet', 'pear', 'grape', 'apple', 'apricot', 'banana', 'orange', 'plum', 'tangerine', 'peach', 'truck', 'bicycle', 'bus', 'airplane', 'automobile', 'carriage', 'train', 'streetcar', 'motorcycle', 'tomahawk', 'switchblade', 'tank', 'cannon', 'knife', 'bullet', 'sword', 'gun', 'spear', 'squash', 'spinach', 'corn', 'asparagus', 'broccoli', 'lettuce', 'cauliflower', 'pea', 'carrot', 'chisel', 'screwdriver', 'ruler', 'level', 'hammer', 'plane', 'drill', 'toolbox', 'nail', 'swallow', 'dove', 'robin', 'canary', 'lark', 'sparrow', 'parakeet', 'blackbird', 'bluebird', 'drum', 'sandbox', 'skate', 'marble', 'doll', 'checker', 'ball', 'swing', 'crayon', 'pant', 'shirt', 'dress', 'underpants', 'suit', 'blouse', 'jacket', 'skirt', 'sweater']
+cljs = [['sofa', 'chair', 'bench', 'bed', 'table', 'ottoman', 'cabinet', 'vanity', 'buffet'], ['pear', 'grape', 'apple', 'apricot', 'banana', 'orange', 'plum', 'tangerine', 'peach'], ['truck', 'bicycle', 'bus', 'airplane', 'automobile', 'carriage', 'train', 'streetcar', 'motorcycle'], ['tomahawk', 'switchblade', 'tank', 'cannon', 'knife', 'bullet', 'sword', 'gun', 'spear'], ['squash', 'spinach', 'corn', 'asparagus', 'broccoli', 'lettuce', 'cauliflower', 'pea', 'carrot'], ['chisel', 'screwdriver', 'ruler', 'level', 'hammer', 'plane', 'drill', 'toolbox', 'nail'], ['swallow', 'dove', 'robin', 'canary', 'lark', 'sparrow', 'parakeet', 'blackbird', 'bluebird'], ['drum', 'sandbox', 'skate', 'marble', 'doll', 'checker', 'ball', 'swing', 'crayon'], ['pant', 'shirt', 'dress', 'underpants', 'suit', 'blouse', 'jacket', 'skirt', 'sweater']]
+
+bat = 1
+stp = 4000000
+
+clads = ['FURNITURE', 'FRUIT', 'VEHICLES', 'WEAPONS', 'VEGETABLES', 'TOOLS', 'BIRDS', 'TOYS', 'CLOTHING']
+clad = {}
+for n in range(len(cljs)):
+    for obj in cljs[n]:
+        clad[obj] = clads[n]
+
+fr = '/home/masteradamo/academy/data/RoschNet/'
+fd = '/tmp/ximps/'
+
+tf.logging.set_verbosity(tf.logging.INFO)
+logger = logging.getLogger('tensorflow')
+logger.setLevel(logging.DEBUG)
+formatter = logging.Formatter('%(message)s')
+flg = logging.FileHandler('/home/masteradamo/academy/sultres/affordances/LossLogLabel-' + str(bat) + '-' + str(stp) + '.txt')
+flg.setLevel(logging.DEBUG)
+flg.setFormatter(formatter)
+logger.addHandler(flg)
+
+clct = len(objs) #number of classes
+chct = 3 #number of channels
+ht = 28 #resized image height
+wd = 28 #resized image width
+
+cladi = {}
+for bunch in cljs:
+    for item in bunch:
+        cladi[item] = set(bunch)
+
+def model(features,labels,mode):
+    inpl = tf.reshape(features["x"],[-1,28,28,3])
+    conv1 = tf.layers.conv2d(inputs=inpl,filters=32,kernel_size=[5, 5],padding="same",activation=tf.nn.relu)
+    pool1 = tf.layers.max_pooling2d(inputs=conv1,pool_size=[2, 2],strides=2)
+    conv2 = tf.layers.conv2d(inputs=pool1,filters=64,kernel_size=[5, 5],padding="same",activation=tf.nn.relu)
+    pool2 = tf.layers.max_pooling2d(inputs=conv2,pool_size=[2, 2],strides=2)
+    flat = tf.reshape(pool2, [-1,7*7*64])
+#    print("HA")
+    dense = tf.layers.dense(inputs=flat,units=1024,activation=tf.nn.relu)
+    drop = tf.layers.dropout(inputs=dense,rate=0.4,training=mode == tf.estimator.ModeKeys.TRAIN)
+    logits = tf.layers.dense(inputs=drop,units=clct)
+    preds = {"classes":tf.argmax(input=logits,axis=1),"probabilities":tf.nn.softmax(logits,name="smtx")}
+#    print("HA")
+    if mode == tf.estimator.ModeKeys.PREDICT:
+        return tf.estimator.EstimatorSpec(mode=mode,predictions=preds)
+    onehot = tf.one_hot(indices=tf.cast(labels,tf.int32),depth=clct)
+    loss = tf.losses.softmax_cross_entropy(onehot_labels=onehot,logits=logits)
+    if mode == tf.estimator.ModeKeys.TRAIN:
+        optimizer = tf.train.GradientDescentOptimizer(learning_rate=0.001)
+        trop = optimizer.minimize(loss=loss,global_step=tf.train.get_global_step())
+#        print("HA")
+        return tf.estimator.EstimatorSpec(mode=mode,loss=loss,train_op=trop)
+    evmet = {"accuracy":tf.metrics.accuracy(labels=labels,predictions=preds["classes"])}
+    return tf.estimator.EstimatorSpec(mode=mode,loss=loss,eval_metric_ops=evmet)
+
+def converter(img):
+#    print("IMG",len(img),len(img[0]),len(img[0][0]),img[0][0])
+    return [[[x/255.0 for x in y] for y in z] for z in img]
+#    print("RMG",len(rmg),len(rmg[0]),len(rmg[0][0]),rmg[0][0])
+#    return rmg
+
+def importer(trat):
+    trada,trala,evda,evla = [[],[],[],[]]
+    labdi = {objs[x]:x for x in range(len(objs))}
+    revdi = {labdi[x]:x for x in labdi}
+    print("LABDI",labdi,len(labdi))
+    imdi = {x.split("::")[0]:[int(y) for y in x.split("::")[1].split(",")] for x in open('RandIms.txt','r').readlines()}
+    for obj in objs:
+        print("PROCESSING",obj)
+        di = fr+obj+"/"
+        lidi = [x for x in listdir(di)]
+        imgs = [lidi[x] for x in imdi[obj]]
+#        random.shuffle(imgs)
+#        imgs = imgs[:min(500,len(imgs))]
+        pt = int(len(imgs)*trat)
+#        cv2.imread(di+imgs[0],(ht,wd))
+        conv = [converter(cv2.resize(cv2.imread(di+x),(ht,wd))) for x in imgs]
+#        tif = tf.reshape(conv[0],[-1,28,28,3])
+#        print("TIF",tif,type(tif))
+        trada.extend(conv[:pt])
+        trala.extend([labdi[obj] for x in range(pt)])
+        evda.extend(conv[pt:])
+        evla.extend([labdi[obj] for x in range(len(imgs)-pt)])
+        conv = []
+    trada,trala,evda,evla = [np.array(x) for x in [trada,trala,evda,evla]]
+    return trada,trala,evda,evla,labdi,revdi
+
+def main(unused_argv):
+#    mnist = tf.contrib.learn.datasets.load_dataset("mnist")
+#    trada = mnist.train.images
+#    print("MNIST",type(trada))
+#    trala = np.asarray(mnist.train.labels,dtype=np.int32)
+#    evda = mnist.test.images
+#    evla = np.asarray(mnist.test.labels,dtype=np.int32)
+    trada,trala,evda,evla,labdi,revdi = importer(0.88889)
+#    print("MINE",type(trada))
+
+    classi = tf.estimator.Estimator(model_fn=model,model_dir=fd)
+    ttl = {"probabilities":"smtx"}
+    loghook = tf.train.LoggingTensorHook(tensors=ttl,every_n_iter=50)
+
+    #print("HA")
+    traput = tf.estimator.inputs.numpy_input_fn(x={"x":trada},y=trala,batch_size=bat,num_epochs=None,shuffle=True)
+    #print("HA")
+#    classi.train(input_fn=traput,steps=1000,hooks=[loghook])
+    classi.train(input_fn=traput,steps=stp)
+    print("HA")
+    inp = tf.estimator.inputs.numpy_input_fn(x={"x":evda},shuffle=False)
+    outs = classi.predict(input_fn=inp)
+#    print("OUTS",[x for x in outs])
+    outs = [list(x["probabilities"]) for x in outs]
+    hits,cls,tfiv,tot = 0.0,0.0,0.0,0.0
+    clh,clg,lah,lag,xlh,xth,lar,clr = dd(float),dd(float),dd(float),dd(float),dd(float),dd(float),dd(float),dd(float)
+    for n in range(len([x for x in outs])):
+#        guess = outs[n]["probabilities"].index(max(outs[n]["probabilities"]))
+        guess = outs[n].index(max(outs[n]))
+        print(revdi[guess],revdi[evla[n]])
+        hits += guess == evla[n]
+        cls += guess in [labdi[x] for x in cladi[revdi[evla[n]]] if x in labdi]
+        tfiv += evla[n] in [outs[n].index(x) for x in sorted(outs[n],reverse=True)[:9]]
+        tot += 1
+        lah[revdi[guess]] += guess == evla[n]
+        lag[revdi[guess]] += 1
+#        clasp = clad.index([x for x in clad if revdi[guess] in x][0])
+        clasp = clad[revdi[guess]]
+        clh[clasp] += guess in [labdi[x] for x in cladi[revdi[evla[n]]] if x in labdi]
+        clg[clasp] += 1
+        xlh[revdi[guess]] += guess in [labdi[x] for x in cladi[revdi[evla[n]]] if x in labdi]
+        xth[revdi[targ]] += guess in [labdi[x] for x in cladi[revdi[evla[n]]] if x in labdi]
+#        xlg[revdi[guess]] += 1
+        lar[revdi[evla[n]]] += 1
+        clr[clad[revdi[evla[n]]]] += 1
+#    lar = 500*(1-0.888889)
+#    clr = (500*9)*(1-0.888889)
+#    print("LAR",lar)
+#    print("CLR",clr)
+#    print()
+    print("ACCURACY:",hits/tot)
+    print("CLASS:",cls/tot)
+    print("TOP NINE:",tfiv/tot)
+    print("TOP HITS:",sorted([(lag[x],x) for x in objs],reverse=True))
+    print("PRECISION (TARGET/CLASS):",[x + ": " + "%.3f" % (lah[x]/max(1,lag[x])) + ", " + "%.3f" % (xlh[x]/max(1,lag[x])) for x in objs])
+    print("RECALL (TARGET/CLASS):",[x + ": " + "%.3f" % (lah[x]/lar[x]) + ", " + "%.3f" % (xlh[x]/lar[x]) for x in objs])
+    print("CLASS (PREC/REC):",[x + ": " + "%.3f" % (clh[x]/max(1,clg[x])) + ", " + "%.3f" % (clh[x]/clr[x]) for x in clads])
+#    print()
+#    print("LAH",lah)
+
+#    evput = tf.estimator.inputs.numpy_input_fn(x={"x":evda},y=evla,num_epochs=1,shuffle=False)
+#    evsults = classi.evaluate(input_fn=evput)
+#    print(evsults)
+
+if __name__ == "__main__":
+    tf.app.run()
+
+def cycler(tags,cut):
+    stuff = [x for y in [[z for z in listdir(fr+y) if isfile(join(z,fr+y))] for y in tags] for x in y]
+    random.shuffle(stuff)
+    trims = stuff[:int(cut*len(stuff))]

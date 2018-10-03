@@ -1,0 +1,352 @@
+from __future__ import absolute_import
+from __future__ import division
+from __future__ import print_function
+import numpy as np
+import tensorflow as tf
+from os import listdir
+from os.path import isfile,join
+import random
+import cv2
+import json
+from collections import defaultdict as dd
+import logging
+
+#objs = ["chair", "sofa", "orange", "apple"]
+#objs = ["chair", "sofa", "table", "dresser", "bed", "orange", "apple", "banana", "peach", "pear", "automobile", "truck", "bus", "motorcycle", "streetcar", "gun", "switchblade", "knife", "sword", "spear", "pea", "carrot", "spinach", "broccoli", "asparagus"]
+#cljs = [["chair", "sofa", "table", "dresser", "bed", "ottoman", "cabinet", "bench", "buffet"], ["orange", "apple", "banana", "peach", "pear", "apricot", "tangerine", "plum", "grape"], ["automobile", "truck", "bus", "motorcycle", "streetcar", "train", "bicycle", "carriage", "airplane"], ["gun", "switchblade", "knife", "sword", "bomb", "spear", "cannon", "bullet", "tomahawk"], ["pea", "carrot", "spinach", "broccoli", "asparagus", "corn", "cauliflower", "squash", "lettuce"], ["hammer", "ruler", "screwdriver", "drill", "nail", "sander", "level", "plane", "file"], ["robin", "sparrow", "bluebird", "canary", "blackbird", "dove", "lark", "swallow", "parakeet"], ["doll", "marble", "ball", "wagon", "crayon", "skate", "drum", "swing", "checker"], ["pant", "shirt", "dress", "skirt", "blouse", "suit", "jacket", "sweater", "underpants"]]
+
+objs = ['sofa', 'chair', 'bench', 'bed', 'table', 'ottoman', 'cabinet', 'vanity', 'buffet', 'pear', 'grape', 'apple', 'apricot', 'banana', 'orange', 'plum', 'tangerine', 'peach', 'truck', 'bicycle', 'bus', 'airplane', 'automobile', 'carriage', 'train', 'streetcar', 'motorcycle', 'tomahawk', 'switchblade', 'tank', 'cannon', 'knife', 'bullet', 'sword', 'gun', 'spear', 'squash', 'spinach', 'corn', 'asparagus', 'broccoli', 'lettuce', 'cauliflower', 'pea', 'carrot', 'chisel', 'screwdriver', 'ruler', 'level', 'hammer', 'plane', 'drill', 'toolbox', 'nail', 'swallow', 'dove', 'robin', 'canary', 'lark', 'sparrow', 'parakeet', 'blackbird', 'bluebird', 'drum', 'sandbox', 'skate', 'marble', 'doll', 'checker', 'ball', 'swing', 'crayon', 'pant', 'shirt', 'dress', 'underpants', 'suit', 'blouse', 'jacket', 'skirt', 'sweater']
+cljs = [['sofa', 'chair', 'bench', 'bed', 'table', 'ottoman', 'cabinet', 'vanity', 'buffet'], ['pear', 'grape', 'apple', 'apricot', 'banana', 'orange', 'plum', 'tangerine', 'peach'], ['truck', 'bicycle', 'bus', 'airplane', 'automobile', 'carriage', 'train', 'streetcar', 'motorcycle'], ['tomahawk', 'switchblade', 'tank', 'cannon', 'knife', 'bullet', 'sword', 'gun', 'spear'], ['squash', 'spinach', 'corn', 'asparagus', 'broccoli', 'lettuce', 'cauliflower', 'pea', 'carrot'], ['chisel', 'screwdriver', 'ruler', 'level', 'hammer', 'plane', 'drill', 'toolbox', 'nail'], ['swallow', 'dove', 'robin', 'canary', 'lark', 'sparrow', 'parakeet', 'blackbird', 'bluebird'], ['drum', 'sandbox', 'skate', 'marble', 'doll', 'checker', 'ball', 'swing', 'crayon'], ['pant', 'shirt', 'dress', 'underpants', 'suit', 'blouse', 'jacket', 'skirt', 'sweater']]
+
+bat = 1
+stp = 1000000
+lrn = 0.001
+lim = 100
+cut = 0
+smth = 0.0001
+clct = len(objs) #number of classes
+vcnt = 200 #dimensionality of word vectors
+chct = 3 #number of channels
+ht = 28 #resized image height
+wd = 28 #resized image width
+marg = 0.05 #margin for comparative loss function
+
+clads = ['FURNITURE', 'FRUIT', 'VEHICLES', 'WEAPONS', 'VEGETABLES', 'TOOLS', 'BIRDS', 'TOYS', 'CLOTHING']
+clad = {}
+for n in range(len(cljs)):
+    for obj in cljs[n]:
+        clad[obj] = clads[n]
+
+fr = '/home/masteradamo/academy/data/RoschNet/'
+fd = '/tmp/001imps' + str(bat) + "-" + str(stp) + "-" + str(lrn) + "/"
+#fd = '/tmp/001imps' + str(bat) + "-" + str(4000000) + "-" + str(0.001) + "/"
+fj = '/home/masteradamo/academy/models/Affordance/100counts.json'
+fw = '/home/masteradamo/academy/models/Affordance/testY.json'
+fwt = '/home/masteradamo/academy/models/Affordance/trainY.json'
+
+cats = [['Ppred'], ['Dsubj'], ['Isubj'], ['Ipred'], ['Dpred'], ['Iobj']]
+#cats = [['Psubj'], ['Ppred'], ['Pobj'], ['Dsubj'], ['Dpred'], ['Dobj'], ['Isubj'], ['Ipred'], ['Iobj']]
+
+excl = set(["be", "have", "is", "are", "was", "were", "would", "use", "-PRON-", "xyear", "xnumb", "which", "who", "this", "that", "i",'sofa', 'chair', 'bench', 'bed', 'table', 'ottoman', 'cabinet', 'vanity', 'buffet', 'pear', 'grape', 'apple', 'apricot', 'banana', 'orange', 'plum', 'tangerine', 'peach', 'truck', 'bicycle', 'bus', 'airplane', 'automobile', 'carriage', 'train', 'streetcar', 'motorcycle', 'tomahawk', 'switchblade', 'tank', 'cannon', 'knife', 'bullet', 'sword', 'gun', 'spear', 'squash', 'spinach', 'corn', 'asparagus', 'broccoli', 'lettuce', 'cauliflower', 'pea', 'carrot', 'chisel', 'screwdriver', 'ruler', 'level', 'hammer', 'plane', 'drill', 'toolbox', 'nail', 'swallow', 'dove', 'robin', 'canary', 'lark', 'sparrow', 'parakeet', 'blackbird', 'bluebird', 'drum', 'sandbox', 'skate', 'marble', 'doll', 'checker', 'ball', 'swing', 'crayon', 'pant', 'shirt', 'dress', 'underpants', 'suit', 'blouse', 'jacket', 'skirt', 'sweater'])
+
+tf.logging.set_verbosity(tf.logging.INFO)
+logger = logging.getLogger('tensorflow')
+logger.setLevel(logging.DEBUG)
+formatter = logging.Formatter('%(message)s')
+flg = logging.FileHandler('/home/masteradamo/academy/sultres/affordances/LossLogAff-' + str(bat) + '-' + str(stp) + '.txt')
+flg.setLevel(logging.DEBUG)
+flg.setFormatter(formatter)
+logger.addHandler(flg)
+
+#wvmod = W2V.load(fv)
+data = json.load(open('/home/masteradamo/academy/models/Affordance/100counts.json','r'))
+
+def counter():
+    freqs = {x[0]:dd(float) for x in cats}
+    for obj in objs:
+        for sat in cats:
+            tot = sum([sum([data[obj][x][y] for y in data[obj][x]]) for x in sat])
+            for cat in sat:
+#                tot = sum([data[obj][cat][x] for x in data[obj][cat]])
+                for word in data[obj][cat]:
+                    if word not in excl:
+                        freqs[sat[0]][word] += data[obj][cat][word]/tot
+    return {x:sorted([(freqs[x][y],y) for y in freqs[x]],reverse=True) for x in freqs}
+
+def cointer():
+    freqs = {x[0]:dd(float) for x in cats}
+    seqs = {x[0]:set() for x in cats}
+    robj = [x for x in objs]
+    random.shuffle(robj)
+    for obj in robj:
+        for sat in cats:
+            tot = sum([sum([data[obj][x][y] for y in data[obj][x]]) for x in sat])
+            obd = dd(float)
+            for cat in sat:
+                for word in data[obj][cat]:
+                    if word not in excl:
+                        val = data[obj][cat][word]/tot
+                        obd[word] += val
+                        freqs[sat[0]][word] += val
+            pends = [("pre",x[1]) for x in sorted([(obd[y],y) for y in obd],reverse=True) if ("pre",x[1]) not in seqs[sat[0]]]
+#            seqs[sat[0]].update(pends[:min(math.floor(lim/(2*len(cats))),1)])
+            seqs[sat[0]].update(pends[:cut])
+            print("seq",[(x,len(seqs[x])) for x in seqs])
+    for seq in seqs:
+        print(seq,[x[1] for x in seqs[seq]])
+    return {x:[z for z in seqs[x]] + sorted([(freqs[x][y],y) for y in freqs[x] if ("pre",y) not in seqs[x]],reverse=True) for x in freqs}
+
+def distributer(freqs):
+    aff = {x:{} for x in objs}
+    for cat in freqs:
+        targs = [x[1] for x in freqs[cat][:lim]]
+        for obj in objs:
+            for word in targs:
+                if word not in data[obj][cat]:
+                    data[obj][cat][word] = 0
+            tot = sum([data[obj][cat][x] for x in targs])
+            aff[obj][cat] = {x:data[obj][cat][x]/max(1,tot) for x in targs}
+    return aff
+
+def smoother(mat,floor):
+#    print("ROUGH",mat)
+    pums = [sum(x) for x in mat]
+    pmat = [[x/pums[y] for x in mat[y]] for y in range(len(mat))]
+#    print("PMAT",pmat)
+    smat = [[max(floor,x) for x in y] for y in pmat]
+    sums = [sum(x) for x in smat]
+#    print("SMOOTH",[[x/sums[y] for x in smat[y]] for y in range(len(smat))])
+    return [[x/sums[y] for x in smat[y]] for y in range(len(smat))]
+
+def tfoother(mat,floor):
+    pums = tf.reduce_sum(mat,1)
+    pmat = [[tf.div(x,pums[y]) for x in mat[y]] for y in range(len(mat))]
+
+def veccer(vec,floor):
+    smec = [max(floor,x) for x in vec]
+    el = sum(smec)
+    return [x/el for x in smec]
+
+'''
+def caster(dist):
+    pcast = [x for x in dist[objs[0]]["pred"]]
+    ncast = [x for x in dist[objs[0]]["noun"]]
+#    return {obj:np.array([dist[obj]["pred"][x] for x in cast]) for obj in objs}
+    return {obj:np.array([veccer([dist[obj]["pred"][x] for x in pcast],0.01),veccer([dist[obj]["noun"][y] for y in ncast],0.01)]) for obj in objs}
+'''
+
+def caster(dist):
+    catcasts = {y:[x for x in dist[objs[0]][y]] for y in dist[objs[0]]}
+    return {obj:np.array([veccer([dist[obj][y][x] for x in catcasts[y]],smth) for y in dist[obj]]) for obj in dist}
+
+def converter(img):
+    return [[[x/255.0 for x in y] for y in z] for z in img]
+
+def normer(vec):
+    return vec/np.sqrt(sum([x**2 for x in vec]))
+
+#permdi = caster(builder())
+permdi = caster(distributer(cointer()))
+permdi["null"] = np.array([[0.0 for x in permdi[objs[0]][y]] for y in range(len(permdi[objs[0]]))])
+
+def importer(trat):
+#    dist = builder()
+    dist = distributer(cointer())
+    print("AFFORDANCES CAST")
+    trada,trala = [[],[]]
+    trasa = {}
+    evda = {}
+#    labdi = {x:normer(wvmod[x]) for x in objs}
+    labdi = caster(dist)
+    lisdi = np.array([labdi[x] for x in labdi])
+    print("LABDI",labdi)
+    numdi = [x for x in labdi]
+    cladi = {}
+    for bunch in cljs:
+        for item in bunch:
+            cladi[item] = set(bunch)
+    imdi = {x.split("::")[0]:[int(y) for y in x.split("::")[1].split(",")] for x in open('RandIms.txt','r').readlines()}
+    for obj in objs:
+        di = fr+obj+"/"
+        lidi = [x for x in listdir(di)]
+        imgs = [lidi[x] for x in imdi[obj]]
+        print("PROCESSING",obj,len(imgs))
+#        random.shuffle(imgs)
+#        imgs = imgs[:min(500,len(imgs))]
+        pt = int(len(imgs)*trat)
+        vec = labdi[obj]
+        conv = [converter(cv2.resize(cv2.imread(di+x),(ht,wd))) for x in imgs]
+        trada.extend(conv[:pt])
+        trala.extend([vec for x in range(pt)])
+        trasa[obj] = np.array(conv[:pt])
+        evda[obj] = np.array(conv[pt:])
+        conv = []
+    trada,trala = [np.array(x) for x in [trada,trala]]
+    return trada,trala,evda,lisdi,numdi,cladi,labdi,trasa
+
+def heller(mat,guess):
+    dist = 0.0
+    for n in range(len(mat)):
+        dist += 0.5*sum([(np.sqrt(mat[n][x])-np.sqrt(guess[n][x]))**2 for x in range(len(mat[n]))])
+    return np.sqrt(dist)
+
+def spotter(a,b):
+    a = tf.cast(a,dtype=tf.float32)
+    b = tf.cast(b,dtype=tf.float32)
+    return tf.norm((1/np.sqrt(2))*tf.sqrt(tf.reduce_sum(tf.square(tf.subtract(tf.sqrt(a),tf.sqrt(b))),axis=1)))
+
+def model(features,labels,mode):
+    inpl = tf.reshape(features["x"],[-1,28,28,3],name="input")
+    conv1 = tf.layers.conv2d(inputs=inpl,filters=32,kernel_size=[5, 5],padding="same",activation=tf.nn.relu)
+    pool1 = tf.layers.max_pooling2d(inputs=conv1,pool_size=[2, 2],strides=2)
+    conv2 = tf.layers.conv2d(inputs=pool1,filters=64,kernel_size=[5, 5],padding="same",activation=tf.nn.relu)
+    pool2 = tf.layers.max_pooling2d(inputs=conv2,pool_size=[2, 2],strides=2)
+    flat = tf.reshape(pool2, [-1,7*7*64])
+    dense = tf.layers.dense(inputs=flat,units=1024,activation=tf.nn.relu)
+    drop = tf.layers.dropout(inputs=dense,rate=0.4,training=mode == tf.estimator.ModeKeys.TRAIN)
+#    breds = tf.layers.dropout(inputs=flat,rate=0.4,training=mode == tf.estimator.ModeKeys.TRAIN)
+    breds = tf.layers.dense(inputs=drop,units=lim*len(cats),name="output")
+#    breds = tf.layers.dense(inputs=drop,units=lim*len(cats),name="output",activation=tf.nn.sigmoid)
+#    breds = tf.layers.dense(inputs=drop,units=lim*len(cats),activation=tf.nn.sigmoid,name="output")
+#    breds = tf.layers.dropout(inputs=breds,rate=0.1,training=mode == tf.estimator.ModeKeys.TRAIN)
+    breds = tf.reshape(breds,[-1,len(cats),lim])
+#    test = tf.reshape(tf.reduce_sum(breds,1),(-1,1))
+#    breds = breds/tf.reshape(tf.reduce_sum(breds,2),(-1,2,1))
+#    breds = tf.reshape(breds,[-1,2,25])
+    treds = tf.cast(tf.nn.softmax(breds),tf.float32,name="smtx")
+#    treds = tf.nn.softmax(treds)
+#    preds = {"classes":treds,"probabilities":tf.cast(tf.nn.softmax(breds),tf.float32,name="smtx")}
+    preds = {"classes":treds,"probabilities":treds}
+    if mode == tf.estimator.ModeKeys.PREDICT:
+        return tf.estimator.EstimatorSpec(mode=mode,predictions=preds)
+#    loss = tf.losses.mean_squared_error(labels=labels,predictions=treds,reduction=tf.losses.Reduction.SUM)
+#    spot = tf.sqrt(tf.losses.mean_squared_error(labels=tf.sqrt(labels),predictions=tf.sqrt(treds),reduction=tf.losses.Reduction.SUM))
+    perm = [tf.cast(np.array([permdi[x]]),tf.float32) for x in permdi]
+#    outr = [spotter(tf.stop_gradient(x),tf.stop_gradient(preds["probabilities"])) for x in perm]
+    outr = [spotter(tf.stop_gradient(x),tf.stop_gradient(preds["probabilities"])) for x in perm]    
+    spot = spotter(tf.stop_gradient(labels),preds["probabilities"])
+#    perm = [tf.cast(np.array([permdi[x]]),tf.float32) for x in permdi]
+#    perm = [tf.cast(np.array([permdi[x]]),tf.float32) for x in permdi if tf.greater(tf.losses.mean_squared_error(predictions=tf.cast(np.array([permdi[x]]),tf.float32),labels=labels,reduction=tf.losses.Reduction.SUM),0.05)]
+#    perm = []
+#    merm = [tf.cond(tf.greater(tf.losses.mean_squared_error(predictions=tf.cast(np.array([permdi[x]]),tf.float32),labels=labels, reduction=tf.losses.Reduction.SUM),0.05),perm.append(tf.cast(np.array([permdi[x]]),tf.float32)),perm.append(tf.cast(np.array([permdi["null"]]),tf.float32))) for x in objs]
+#    outr = [tf.sqrt(tf.losses.mean_squared_error(labels=tf.sqrt(x),predictions=tf.sqrt(preds["probabilities"]),reduction=tf.losses.Reduction.SUM)) for x in perm]
+#    outr = [spotter(tf.stop_gradient(x),tf.stop_gradient(preds["probabilities"])) for x in perm]
+    loss = tf.maximum(tf.subtract(tf.reduce_sum([tf.maximum(0.0,spot+marg-x) for x in outr]),marg),0.0)
+#    loss = tf.reduce_max([tf.maximum(0.0,spot+marg-x) for x in outr])
+#    loss = tf.sqrt(tf.losses.mean_squared_error(labels=tf.sqrt(labels),predictions=tf.sqrt(treds),reduction=tf.losses.Reduction.SUM))
+#    loss = tf.metrics.mean_squared_error(tf.sqrt(tf.cast(labels,tf.float32)),tf.sqrt(preds["probabilities"]),reduction=tf.losses.Reduction.SUM)
+#    loss = tf.norm([tf.losses.sparse_softmax_cross_entropy(labels=labels[x],logits=treds[x]) for x in range(len(cats))])
+#    loss = tf.norm(tf.nn.softmax_cross_entropy_with_logits_v2(labels=tf.stop_gradient(labels),logits=breds))
+    if mode == tf.estimator.ModeKeys.TRAIN:
+        optimizer = tf.train.GradientDescentOptimizer(learning_rate=lrn)
+        trop = optimizer.minimize(loss=loss,global_step=tf.train.get_global_step())
+        return tf.estimator.EstimatorSpec(mode=mode,loss=loss,train_op=trop)
+#    evmet = {"cosine":tf.metrics.mean_cosine_distance(labels=labels,predictions=preds["classes"],dim=1)}
+    evmet = {"hellinger":spotter(labels,preds["classes"])}
+    return tf.estimator.EstimatorSpec(mode=mode,loss=loss,eval_metric_ops=evmet)
+
+#def heller(mat,guess):
+#    dist = 0.0
+#    for n in range(len(mat)):
+#        dist += 0.5*sum([(np.sqrt(mat[n][x])-np.sqrt(guess[n][x]))**2 for x in range(len(mat[n]))])
+#    return np.sqrt(dist)
+
+def main(unused_argv):
+    trada,trala,evda,lisdi,numdi,cladi,labdi,trasa = importer(0.88889)
+    verif = [x for x in labdi]
+    classi = tf.estimator.Estimator(model_fn=model,model_dir=fd)
+    ttl = {"probabilities":"smtx"}
+    loghook = tf.train.LoggingTensorHook(tensors=ttl,every_n_iter=50)
+    traput = tf.estimator.inputs.numpy_input_fn(x={"x":trada},y=trala,batch_size=bat,num_epochs=None,shuffle=True)
+#    classi.train(input_fn=traput,steps=stp,hooks=[loghook])
+    classi.train(input_fn=traput,steps=stp)
+    tf.logging.set_verbosity(tf.logging.WARN)
+    print("VERIFYING ENCODINGS")
+    for n in range(len(labdi)):
+        inp = tf.estimator.inputs.numpy_input_fn(x={"x":np.array(trada[n])},shuffle=False)
+        guess = [x["classes"] for x in classi.predict(input_fn=inp)]
+#        print("GUESS",guess)
+        scores = sorted([(heller(labdi[x],smoother(guess[0],smth)),x) for x in labdi])
+        print(verif[n] + " -->",[(y[1],"%.3f" % y[0]) for y in scores])
+        print()
+    hits = 0.0
+    tfiv = 0.0
+    cits = 0.0
+    cnt = 0.0
+    ohits = dd(float)
+    ghits = {obj:0.0 for obj in objs}
+    ocnts = dd(float)
+    vdict = dd(list)
+    cdict = dd(float)
+    xlh = dd(float)
+    clh = dd(float)
+    clr = dd(float)
+    clg = dd(float)
+    jin = {}
+    for obj in trasa:
+        inp = tf.estimator.inputs.numpy_input_fn(x={"x":trasa[obj]},shuffle=False)
+        out = [x["classes"] for x in classi.predict(input_fn=inp)]
+        jin[obj] = [smoother([[float(z) for z in x] for x in y],smth) for y in out]
+    json.dump(jin,open(fwt,'w'))
+    jwrite = {}
+    for obj in evda:
+        inp = tf.estimator.inputs.numpy_input_fn(x={"x":evda[obj]},shuffle=False)
+        out = [x["classes"] for x in classi.predict(input_fn=inp)]
+        print("EVALUATING",obj)
+        jwrite[obj] = [smoother([[float(z) for z in x] for x in y],smth) for y in out]
+        for mat in out:
+            cnt += 1
+            subs = []
+            ocnts[obj] += 1
+            for prop in labdi:
+                val = heller(smoother(mat,smth),labdi[prop])
+                subs.append((val,prop))
+                vdict[prop].append(val)
+            sorts = [x[1] for x in sorted(subs)]
+            print(sorts[:9])
+            clasp = clad[sorts[0]]
+            ghits[sorts[0]] += 1
+            if sorts[0] == obj:
+                hits += 1
+                ohits[obj] += 1
+            if obj in sorts[:9]:
+                tfiv += 1
+            if sorts[0] in cladi[obj]:
+                cits += 1
+                cdict[obj] += 1
+                xlh[sorts[0]] += 1
+                clh[clasp] += 1
+            clr[clad[obj]] += 1
+            clg[clasp] += 1
+    print("BATCH: " + str(bat) + ", STEP: " + str(stp) + ", LEARN: " + str(lrn))
+    print("ACCURACY:",hits/cnt)
+    print("CLASS ACCURACY:",cits/cnt)
+    print("TOP 9:",tfiv/cnt)
+    print("TOP HITS:",sorted([(ghits[x],x) for x in ghits],reverse=True))
+    print("MEAN/STD HELLINGER:",[("%.3f" % y[0],"%.3f" % y[1],y[2]) for y in sorted([(np.mean(vdict[x]),np.std(vdict[x]),x) for x in vdict])])
+#    print("TYPES",type(ohits),type(ghits),type(ocnts))
+#    print([x for x in ocnts])
+#    print([ohits[x] for x in ocnts])
+#    print([ghits[x] for x in ocnts])
+#    print((ohits[x]/max(0.1,ghits[x])) for x in ocnts])
+    print("PRECISION (TARGET/CLASS):",[x+": " + "%.3f" % (ohits[x]/max(1,ghits[x])) + ", " + "%.3f" %  (xlh[x]/max(1,ghits[x])) for x in objs])
+    print("RECALL (TARGET/CLASS):",[x+": " + "%.3f" % (ohits[x]/ocnts[x]) + ", " + "%.3f" % (cdict[x]/ocnts[x]) for x in objs])
+    print("CLASS (PREC/REC):",[x + ": " + "%.3f" % (clh[x]/max(1,clg[x])) + ", " + "%.3f" % (clh[x]/clr[x]) for x in clads])
+#        print("OUT",out)
+#    graph = tf.get_default_graph()
+#    with tf.Session() as sess:
+#        for img in evda:
+#            sess.run("output",feed_dict={"x":img})
+    json.dump(jwrite,open(fw,'w'))
+
+if __name__ == "__main__":
+    tf.app.run()
+
+#one = caster(distributer(cointer()))
+#two = caster(distributer(counter()))
+#print("ONE",[len(x) for x in one["corn"]])
+#print("TWO",[len(x) for x in two["corn"]])
+
+#one = distributer(cointer())
+#print([(x,len(one[x]),[len(one[x][y]) for y in one[x]]) for x in one])
+#print(one["Ppred"][5])
